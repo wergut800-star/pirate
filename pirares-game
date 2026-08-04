@@ -1,0 +1,82 @@
+# app.py
+from flask import Flask, render_template, request, redirect, url_for, session
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your_secret_key_here'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///pirate_game.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# Модель игрока (капитана)
+class Player(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128), nullable=False)
+    gold = db.Column(db.Integer, default=100)
+    health = db.Column(db.Integer, default=100)
+    ship_name = db.Column(db.String(80), default="The Black Pearl")
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+# Главная страница — редирект на игру или вход
+@app.route('/')
+def index():
+    if 'player_id' in session:
+        return redirect(url_for('game'))
+    return redirect(url_for('login'))
+
+# Регистрация
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form['username'].strip()
+        password = request.form['password']
+        if Player.query.filter_by(username=username).first():
+            return "Username already exists. Please choose another."
+        player = Player(username=username)
+        player.set_password(password)
+        db.session.add(player)
+        db.session.commit()
+        session['player_id'] = player.id
+        return redirect(url_for('game'))
+    return render_template('register.html')
+
+# Вход
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username'].strip()
+        password = request.form['password']
+        player = Player.query.filter_by(username=username).first()
+        if player and player.check_password(password):
+            session['player_id'] = player.id
+            return redirect(url_for('game'))
+        else:
+            return "Invalid username or password."
+    return render_template('login.html')
+
+# Выход
+@app.route('/logout')
+def logout():
+    session.pop('player_id', None)
+    return redirect(url_for('login'))
+
+# Игровой экран
+@app.route('/game')
+def game():
+    if 'player_id' not in session:
+        return redirect(url_for('login'))
+    player = Player.query.get(session['player_id'])
+    return render_template('game.html', player=player)
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
